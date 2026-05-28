@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Marauder's Map - Tactical View</title>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { margin: 0; background: #d4c3a3; color: #3e2723; font-family: "Courier New", Courier, monospace; overflow: hidden; touch-action: none; }
+        
+        #status { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(212, 195, 163, 0.9); padding: 8px; border: 1px solid #3e2723; font-weight: bold; pointer-events: none; }
+        
+        /* The New Online Counter */
+        #online-count {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+            background: rgba(212, 195, 163, 0.9);
+            padding: 5px 15px;
+            border: 2px solid #3e2723;
+            border-radius: 4px;
+            font-family: 'Caveat', cursive;
+            font-size: 24px;
+            color: #1a0f0d;
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            pointer-events: none;
+        }
+
+        #viewport { position: absolute; width: 100vw; height: 100vh; overflow: hidden; }
+
+        #camera {
+            position: absolute; top: 50%; left: 50%; width: 0; height: 0; 
+            transform-origin: 0 0; transition: transform 0.1s ease-out; 
+        }
+
+        #map-container {
+            position: absolute; top: -1280px; left: -1280px; width: 2560px; height: 2560px;
+            background-color: #d4c3a3;
+            filter: sepia(0.9) hue-rotate(-15deg) contrast(1.4) brightness(0.9) grayscale(0.2);
+        }
+
+        .map-tile { position: absolute; width: 256px; height: 256px; opacity: 0.7; }
+       #markers-layer { 
+    position: absolute; 
+    top: -1280px; left: -1280px; 
+    width: 2560px; height: 2560px;
+    z-index: 5; 
+    pointer-events: none; 
+}
+
+        .user-marker { 
+            position: absolute; transform: translate(-50%, -50%); 
+            display: flex; flex-direction: column; align-items: center;
+            transition: top 0.5s linear, left 0.5s linear;
+        }
+
+        .name-label {
+            font-family: 'Caveat', cursive; font-size: 24px; color: #1a0f0d; white-space: nowrap;
+            text-shadow: 0px 0px 2px rgba(26, 15, 13, 0.5), 1px 1px 1px rgba(26, 15, 13, 0.2);
+            margin-bottom: 5px; transition: transform 0.1s; 
+        }
+
+        .foot-container { position: relative; width: 14px; height: 20px; transition: transform 0.2s ease; }
+        .footprint { position: absolute; width: 5px; height: 9px; background-color: #1a0f0d; border-radius: 50% 50% 20% 20%; box-shadow: 0 0 2px rgba(26, 15, 13, 0.7); opacity: 0; }
+        .left-foot { top: 0; left: 0; }
+        .right-foot { top: 8px; left: 8px; }
+        .walking .left-foot { animation: step 1.2s infinite 0s; }
+        .walking .right-foot { animation: step 1.2s infinite 0.6s; }
+
+        @keyframes step { 0% { opacity: 0; transform: scale(0.9); } 20% { opacity: 1; transform: scale(1); } 60% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0.9); } }
+    </style>
+</head>
+<body>
+    <div id="status">Initializing Telemetry...</div>
+    
+    <div id="online-count">0 Wizards Online</div>
+    
+    <div id="viewport">
+        <div id="camera">
+            <div id="map-container"></div>
+            <div id="markers-layer"></div>
+        </div>
+    </div>
+
+    <script>
+        const myName = prompt("I solemnly swear that I am up to no good.\n\nEnter your name:") || "Unknown Wizard";
+        const myId = 'agent_' + Math.floor(Math.random() * 10000);
+        
+        const ws = new WebSocket('ws://localhost:8080');
+        const activeUsers = {};
+        const previousPositions = {}; 
+        
+        const mapContainer = document.getElementById('map-container');
+        const markersLayer = document.getElementById('markers-layer');
+        const camera = document.getElementById('camera');
+        const onlineCountDisplay = document.getElementById('online-count');
+        
+        let currentZoomLevel = 16; 
+        const TILE_SIZE = 256;
+        const GRID_RADIUS = 5; 
+        
+        let mapCenterX = null, mapCenterY = null;
+        let camX = 0, camY = 0, camScale = 1;
+        let isDragging = false, startX, startY, initialCamX, initialCamY;
+        let initialPinchDist = null, initialCamScale = 1;
+
+        const viewport = document.getElementById('viewport');
+
+        function updateCameraTransform() {
+            camera.style.transform = `translate(${camX}px, ${camY}px) scale(${camScale})`;
+            const inverseScale = 1 / camScale;
+            document.querySelectorAll('.name-label').forEach(label => {
+                label.style.transform = `scale(${Math.min(inverseScale, 4.0)})`;
+            });
+            document.querySelectorAll('.foot-container').forEach(feet => {
+                feet.style.transform = `scale(${Math.min(inverseScale, 2.0)})`;
+            });
+        }
+
+        viewport.addEventListener('mousedown', (e) => {
+            isDragging = true; startX = e.clientX; startY = e.clientY;
+            initialCamX = camX; initialCamY = camY;
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            camX = initialCamX + (e.clientX - startX); camY = initialCamY + (e.clientY - startY);
+            updateCameraTransform();
+        });
+        window.addEventListener('mouseup', () => isDragging = false);
+
+        viewport.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true; startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+                initialCamX = camX; initialCamY = camY;
+            } else if (e.touches.length === 2) {
+                isDragging = false; 
+                initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                initialCamScale = camScale;
+            }
+        });
+
+        viewport.addEventListener('touchmove', (e) => {
+            e.preventDefault(); 
+            if (e.touches.length === 1 && isDragging) {
+                camX = initialCamX + (e.touches[0].clientX - startX); camY = initialCamY + (e.touches[0].clientY - startY);
+                updateCameraTransform();
+            } else if (e.touches.length === 2 && initialPinchDist) {
+                const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                camScale = Math.max(0.2, Math.min(initialCamScale * (currentDist / initialPinchDist), 3.0));
+                updateCameraTransform();
+            }
+        });
+
+        viewport.addEventListener('touchend', () => { isDragging = false; initialPinchDist = null; });
+
+        viewport.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            camScale = Math.max(0.2, Math.min(camScale + (e.deltaY < 0 ? 0.1 : -0.1), 3.0));
+            updateCameraTransform();
+        }, { passive: false });
+
+        function projectCoordinates(lat, lon, zoom) {
+            const latRad = lat * Math.PI / 180; const n = Math.pow(2, zoom);
+            const xRaw = n * ((lon + 180) / 360); const yRaw = n * (1 - (Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI)) / 2;
+            return { 
+                tileX: Math.floor(xRaw), tileY: Math.floor(yRaw), 
+                pixelX: Math.floor((xRaw - Math.floor(xRaw)) * TILE_SIZE), pixelY: Math.floor((yRaw - Math.floor(yRaw)) * TILE_SIZE)
+            };
+        }
+
+        function calculateBoundingBox(payloads) {
+            const lats = Object.values(payloads).map(p => p.lat), lons = Object.values(payloads).map(p => p.lon);
+            const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+            let targetZoom = 16;
+            if (maxLat - minLat > 0.05) targetZoom = 12;
+            if (maxLat - minLat > 0.5) targetZoom = 8;
+            if (maxLat - minLat > 5.0) targetZoom = 4;
+            return { centerLat: (minLat + maxLat) / 2, centerLon: (Math.min(...lons) + Math.max(...lons)) / 2, targetZoom };
+        }
+
+        function renderMapGrid(centerX, centerY) {
+            mapContainer.innerHTML = ''; 
+            for (let dx = -GRID_RADIUS; dx <= GRID_RADIUS; dx++) {
+                for (let dy = -GRID_RADIUS; dy <= GRID_RADIUS; dy++) {
+                    const img = document.createElement('img'); img.className = 'map-tile';
+                    img.src = `https://tile.openstreetmap.org/${currentZoomLevel}/${centerX + dx}/${centerY + dy}.png`;
+                    img.style.left = `${(dx + GRID_RADIUS) * TILE_SIZE}px`; img.style.top = `${(dy + GRID_RADIUS) * TILE_SIZE}px`;
+                    mapContainer.appendChild(img);
+                }
+            }
+        }
+
+        const latestPayloads = {};
+
+        ws.onopen = () => {
+            document.getElementById('status').innerText = `Active: ${myName}`;
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition((pos) => {
+                    ws.send(JSON.stringify({ id: myId, name: myName, lat: pos.coords.latitude, lon: pos.coords.longitude }));
+                }, (err) => console.error(err), { enableHighAccuracy: true, maximumAge: 0 });
+            }
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            latestPayloads[data.id] = data;
+
+            if (!activeUsers[data.id]) {
+                const bounds = calculateBoundingBox(latestPayloads);
+                currentZoomLevel = bounds.targetZoom;
+                const centerProj = projectCoordinates(bounds.centerLat, bounds.centerLon, currentZoomLevel);
+                mapCenterX = centerProj.tileX; mapCenterY = centerProj.tileY;
+                renderMapGrid(mapCenterX, mapCenterY);
+                camScale = 1; camX = 0; camY = 0; updateCameraTransform();
+                
+                const marker = document.createElement('div'); marker.className = 'user-marker';
+                const label = document.createElement('div'); label.className = 'name-label'; label.innerText = data.name;
+                const feetContainer = document.createElement('div'); feetContainer.className = 'foot-container';
+                feetContainer.innerHTML = '<div class="footprint left-foot"></div><div class="footprint right-foot"></div>';
+                marker.appendChild(label); marker.appendChild(feetContainer); markersLayer.appendChild(marker);
+                
+                activeUsers[data.id] = { element: marker, timeout: null };
+                
+                // UPDATE THE ONLINE COUNTER
+                onlineCountDisplay.innerText = `${Object.keys(activeUsers).length} Wizard(s) Online`;
+            }
+
+            if (mapCenterX === null || mapCenterY === null) return;
+            const projection = projectCoordinates(data.lat, data.lon, currentZoomLevel);
+            const finalPixelX = (projection.tileX - mapCenterX + GRID_RADIUS) * TILE_SIZE + projection.pixelX;
+            const finalPixelY = (projection.tileY - mapCenterY + GRID_RADIUS) * TILE_SIZE + projection.pixelY;
+
+            const markerData = activeUsers[data.id];
+
+            if (previousPositions[data.id]) {
+                const dx = finalPixelX - previousPositions[data.id].x; const dy = finalPixelY - previousPositions[data.id].y;
+                if (Math.sqrt(dx*dx + dy*dy) > 0.5) {
+                    markerData.element.querySelector('.foot-container').style.transform = `rotate(${Math.atan2(dy, dx) * (180 / Math.PI) + 90}deg)`;
+                    markerData.element.classList.add('walking');
+                    clearTimeout(markerData.timeout);
+                    markerData.timeout = setTimeout(() => markerData.element.classList.remove('walking'), 2000);
+                }
+            }
+            
+            previousPositions[data.id] = { x: finalPixelX, y: finalPixelY };
+            markerData.element.style.left = `${finalPixelX}px`; markerData.element.style.top = `${finalPixelY}px`;
+        };
+    </script>
+</body>
+</html>
