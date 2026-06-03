@@ -266,16 +266,36 @@
     }, 10000);
 
     // --- NETWORK & SENSOR BINDINGS ---
-    ws.onopen = () => {
+        ws.onopen = () => {
         document.getElementById('status').innerText = `Active: ${myName}`;
         if (navigator.geolocation) {
-            navigator.geolocation.watchPosition((pos) => {
-                const payload = { id: myId, name: myName, lat: pos.coords.latitude, lon: pos.coords.longitude };
-                // 1. Send to server
-                ws.send(JSON.stringify(payload));
-                // 2. Process locally to avoid the Lone Wizard trap
-                processLocationData(payload);
-            }, (err) => console.error(err), { enableHighAccuracy: true, maximumAge: 0 });
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    const payload = { id: myId, name: myName, lat: pos.coords.latitude, lon: pos.coords.longitude };
+                    ws.send(JSON.stringify(payload));
+                    processLocationData(payload);
+                }, 
+                (err) => {
+                    console.error("Geolocation Error:", err.message);
+                    
+                    // Error Code 1: User hit "Deny" on the browser pop-up
+                    if (err.code === 1) {
+                        alert("Map access denied. Please allow location permissions in your browser settings.");
+                    } 
+                    // Error Code 2: Hardware GPS is OFF or no signal
+                    else if (err.code === 2) {
+                        alert("Hardware GPS is disabled! Please swipe down and turn on your device's Location/GPS to appear on the map.");
+                    } 
+                    // Error Code 3: Took too long to get a lock
+                    else if (err.code === 3) {
+                        document.getElementById('status').innerText = "Waiting for GPS satellite lock...";
+                    }
+                }, 
+                // Added a 10-second timeout so it doesn't hang forever if the GPS is struggling
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 } 
+            );
+        } else {
+            alert("Your browser does not support hardware geolocation.");
         }
     };
 
