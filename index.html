@@ -73,14 +73,7 @@
     align-items: center;
     justify-content: center;
     box-shadow: 2px 2px 8px rgba(26, 15, 13, 0.6);
-}
-
-/* We spin the SVG inside the container, not the container itself */
-#compass-rose {
-    transition: transform 0.1s ease-out;
-    transform-origin: center;
-}
-
+} 
 
         .user-marker { 
             position: absolute; transform: translate(-50%, -50%); 
@@ -360,34 +353,61 @@
             console.error("Malformed socket frame ignored", e);
         }
     };
-     // Hardware Compass Rotation
-// Hardware Compass Rotation (Cross-Platform)
-if (window.DeviceOrientationEvent) {
-    const compass = document.getElementById('compass-rose');
+     // Hardware Compass Rotation (Smoothed)
+const compass = document.getElementById('compass-rose');
+
+if (window.DeviceOrientationEvent && compass) {
+    let hasAbsoluteLock = false;
     
+    // Physics states for the needle
+    let currentRotation = 0; 
+    let targetRotation = 0;
+
+    // 1. The Rendering Loop (Runs at 60FPS)
+    function animateCompass() {
+        // LERP: Move the needle 10% of the remaining distance per frame
+        currentRotation += (targetRotation - currentRotation) * 0.1;
+        compass.style.transform = `rotate(${currentRotation}deg)`;
+        requestAnimationFrame(animateCompass);
+    }
+    requestAnimationFrame(animateCompass); // Ignite the loop
+
+    // 2. The Shortest-Path Calculator
+    function updateTargetHeading(heading) {
+        let desiredRotation = -heading; // Reverse to keep North up
+        
+        // Calculate the angular delta
+        let diff = desiredRotation - targetRotation;
+        
+        // Normalize the delta to strictly fall between -180 and 180 degrees
+        // This completely eliminates the 360 -> 0 violent spin
+        diff = ((diff + 180) % 360 + 360) % 360 - 180;
+        
+        targetRotation += diff;
+    }
+
+    // 3. Sensor Bindings
     window.addEventListener('deviceorientationabsolute', (event) => {
         if (event.alpha !== null) {
-            // Android absolute heading
-            compass.style.transform = `rotate(${-event.alpha}deg)`;
+            hasAbsoluteLock = true;
+            updateTargetHeading(event.alpha);
         }
     }, true);
 
-    // Fallback for devices that don't support absolute orientation natively
     window.addEventListener('deviceorientation', (event) => {
+        if (hasAbsoluteLock) return;
+        
         let heading = null;
         if (event.webkitCompassHeading) {
-            // iOS heading
             heading = event.webkitCompassHeading;
-        } else if (event.alpha !== null && !window.ondeviceorientationabsolute) {
-            // Standard fallback calculation
+        } else if (event.alpha !== null) {
             heading = 360 - event.alpha;
         }
         
-        if (heading !== null) {
-            compass.style.transform = `rotate(${-heading}deg)`;
-        }
+        if (heading !== null) updateTargetHeading(heading);
     }, true);
 }
+
 
 
 </script>
