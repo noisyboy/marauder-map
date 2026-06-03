@@ -83,169 +83,211 @@
         </div>
     </div>
 
-    <script>
-        const myName = prompt("I solemnly swear that I am up to no good.\n\nEnter your name:") || "Unknown Wizard";
-        const myId = 'agent_' + Math.floor(Math.random() * 10000);
-        
-        const ws = new WebSocket('wss://tun.noisyboy.qzz.io');
-        const activeUsers = {};
-        const previousPositions = {}; 
-        
-        const mapContainer = document.getElementById('map-container');
-        const markersLayer = document.getElementById('markers-layer');
-        const camera = document.getElementById('camera');
-        const onlineCountDisplay = document.getElementById('online-count');
-        
-        let currentZoomLevel = 16; 
-        const TILE_SIZE = 256;
-        const GRID_RADIUS = 5; 
-        
-        let mapCenterX = null, mapCenterY = null;
-        let camX = 0, camY = 0, camScale = 1;
-        let isDragging = false, startX, startY, initialCamX, initialCamY;
-        let initialPinchDist = null, initialCamScale = 1;
+ <script>
+    const myName = prompt("I solemnly swear that I am up to no good.\n\nEnter your name:") || "Unknown Wizard";
+    const myId = 'agent_' + Math.floor(Math.random() * 10000);
+    
+    const ws = new WebSocket('wss://tun.noisyboy.qzz.io');
+    const activeUsers = {};
+    const previousPositions = {}; 
+    const latestPayloads = {};
+    
+    const mapContainer = document.getElementById('map-container');
+    const markersLayer = document.getElementById('markers-layer');
+    const camera = document.getElementById('camera');
+    const onlineCountDisplay = document.getElementById('online-count');
+    
+    let currentZoomLevel = 16; 
+    const TILE_SIZE = 256;
+    const GRID_RADIUS = 5; 
+    
+    let mapCenterX = null, mapCenterY = null;
+    let camX = 0, camY = 0, camScale = 1;
+    let isDragging = false, startX, startY, initialCamX, initialCamY;
+    let initialPinchDist = null, initialCamScale = 1;
 
-        const viewport = document.getElementById('viewport');
+    const viewport = document.getElementById('viewport');
 
-        function updateCameraTransform() {
-            camera.style.transform = `translate(${camX}px, ${camY}px) scale(${camScale})`;
-            const inverseScale = 1 / camScale;
-            document.querySelectorAll('.name-label').forEach(label => {
-                label.style.transform = `scale(${Math.min(inverseScale, 4.0)})`;
-            });
-            document.querySelectorAll('.foot-container').forEach(feet => {
-                feet.style.transform = `scale(${Math.min(inverseScale, 2.0)})`;
-            });
-        }
+    // --- CAMERA & TOUCH CONTROLS ---
+    function updateCameraTransform() {
+        camera.style.transform = `translate(${camX}px, ${camY}px) scale(${camScale})`;
+        const inverseScale = 1 / camScale;
+        document.querySelectorAll('.name-label').forEach(label => {
+            label.style.transform = `scale(${Math.min(inverseScale, 4.0)})`;
+        });
+        document.querySelectorAll('.foot-container').forEach(feet => {
+            feet.style.transform = `scale(${Math.min(inverseScale, 2.0)})`;
+        });
+    }
 
-        viewport.addEventListener('mousedown', (e) => {
-            isDragging = true; startX = e.clientX; startY = e.clientY;
+    viewport.addEventListener('mousedown', (e) => {
+        isDragging = true; startX = e.clientX; startY = e.clientY;
+        initialCamX = camX; initialCamY = camY;
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        camX = initialCamX + (e.clientX - startX); camY = initialCamY + (e.clientY - startY);
+        updateCameraTransform();
+    });
+    window.addEventListener('mouseup', () => isDragging = false);
+
+    viewport.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            isDragging = true; startX = e.touches[0].clientX; startY = e.touches[0].clientY;
             initialCamX = camX; initialCamY = camY;
-        });
-        window.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            camX = initialCamX + (e.clientX - startX); camY = initialCamY + (e.clientY - startY);
+        } else if (e.touches.length === 2) {
+            isDragging = false; 
+            initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            initialCamScale = camScale;
+        }
+    });
+
+    viewport.addEventListener('touchmove', (e) => {
+        e.preventDefault(); 
+        if (e.touches.length === 1 && isDragging) {
+            camX = initialCamX + (e.touches[0].clientX - startX); camY = initialCamY + (e.touches[0].clientY - startY);
             updateCameraTransform();
-        });
-        window.addEventListener('mouseup', () => isDragging = false);
-
-        viewport.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 1) {
-                isDragging = true; startX = e.touches[0].clientX; startY = e.touches[0].clientY;
-                initialCamX = camX; initialCamY = camY;
-            } else if (e.touches.length === 2) {
-                isDragging = false; 
-                initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                initialCamScale = camScale;
-            }
-        });
-
-        viewport.addEventListener('touchmove', (e) => {
-            e.preventDefault(); 
-            if (e.touches.length === 1 && isDragging) {
-                camX = initialCamX + (e.touches[0].clientX - startX); camY = initialCamY + (e.touches[0].clientY - startY);
-                updateCameraTransform();
-            } else if (e.touches.length === 2 && initialPinchDist) {
-                const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                camScale = Math.max(0.2, Math.min(initialCamScale * (currentDist / initialPinchDist), 3.0));
-                updateCameraTransform();
-            }
-        });
-
-        viewport.addEventListener('touchend', () => { isDragging = false; initialPinchDist = null; });
-
-        viewport.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            camScale = Math.max(0.2, Math.min(camScale + (e.deltaY < 0 ? 0.1 : -0.1), 3.0));
+        } else if (e.touches.length === 2 && initialPinchDist) {
+            const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            camScale = Math.max(0.2, Math.min(initialCamScale * (currentDist / initialPinchDist), 3.0));
             updateCameraTransform();
-        }, { passive: false });
-
-        function projectCoordinates(lat, lon, zoom) {
-            const latRad = lat * Math.PI / 180; const n = Math.pow(2, zoom);
-            const xRaw = n * ((lon + 180) / 360); const yRaw = n * (1 - (Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI)) / 2;
-            return { 
-                tileX: Math.floor(xRaw), tileY: Math.floor(yRaw), 
-                pixelX: Math.floor((xRaw - Math.floor(xRaw)) * TILE_SIZE), pixelY: Math.floor((yRaw - Math.floor(yRaw)) * TILE_SIZE)
-            };
         }
+    });
 
-        function calculateBoundingBox(payloads) {
-            const lats = Object.values(payloads).map(p => p.lat), lons = Object.values(payloads).map(p => p.lon);
-            const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-            let targetZoom = 16;
-            if (maxLat - minLat > 0.05) targetZoom = 12;
-            if (maxLat - minLat > 0.5) targetZoom = 8;
-            if (maxLat - minLat > 5.0) targetZoom = 4;
-            return { centerLat: (minLat + maxLat) / 2, centerLon: (Math.min(...lons) + Math.max(...lons)) / 2, targetZoom };
-        }
+    viewport.addEventListener('touchend', () => { isDragging = false; initialPinchDist = null; });
 
-        function renderMapGrid(centerX, centerY) {
-            mapContainer.innerHTML = ''; 
-            for (let dx = -GRID_RADIUS; dx <= GRID_RADIUS; dx++) {
-                for (let dy = -GRID_RADIUS; dy <= GRID_RADIUS; dy++) {
-                    const img = document.createElement('img'); img.className = 'map-tile';
-                    img.src = `https://tile.openstreetmap.org/${currentZoomLevel}/${centerX + dx}/${centerY + dy}.png`;
-                    img.style.left = `${(dx + GRID_RADIUS) * TILE_SIZE}px`; img.style.top = `${(dy + GRID_RADIUS) * TILE_SIZE}px`;
-                    mapContainer.appendChild(img);
-                }
-            }
-        }
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        camScale = Math.max(0.2, Math.min(camScale + (e.deltaY < 0 ? 0.1 : -0.1), 3.0));
+        updateCameraTransform();
+    }, { passive: false });
 
-        const latestPayloads = {};
-
-        ws.onopen = () => {
-            document.getElementById('status').innerText = `Active: ${myName}`;
-            if (navigator.geolocation) {
-                navigator.geolocation.watchPosition((pos) => {
-                    ws.send(JSON.stringify({ id: myId, name: myName, lat: pos.coords.latitude, lon: pos.coords.longitude }));
-                }, (err) => console.error(err), { enableHighAccuracy: true, maximumAge: 0 });
-            }
+    // --- MAP MATH ---
+    function projectCoordinates(lat, lon, zoom) {
+        const latRad = lat * Math.PI / 180; const n = Math.pow(2, zoom);
+        const xRaw = n * ((lon + 180) / 360); const yRaw = n * (1 - (Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI)) / 2;
+        return { 
+            tileX: Math.floor(xRaw), tileY: Math.floor(yRaw), 
+            pixelX: Math.floor((xRaw - Math.floor(xRaw)) * TILE_SIZE), pixelY: Math.floor((yRaw - Math.floor(yRaw)) * TILE_SIZE)
         };
+    }
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            latestPayloads[data.id] = data;
+    function calculateBoundingBox(payloads) {
+        const lats = Object.values(payloads).map(p => p.lat), lons = Object.values(payloads).map(p => p.lon);
+        const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+        let targetZoom = 16;
+        if (maxLat - minLat > 0.05) targetZoom = 12;
+        if (maxLat - minLat > 0.5) targetZoom = 8;
+        if (maxLat - minLat > 5.0) targetZoom = 4;
+        return { centerLat: (minLat + maxLat) / 2, centerLon: (Math.min(...lons) + Math.max(...lons)) / 2, targetZoom };
+    }
 
-            if (!activeUsers[data.id]) {
-                const bounds = calculateBoundingBox(latestPayloads);
-                currentZoomLevel = bounds.targetZoom;
-                const centerProj = projectCoordinates(bounds.centerLat, bounds.centerLon, currentZoomLevel);
-                mapCenterX = centerProj.tileX; mapCenterY = centerProj.tileY;
-                renderMapGrid(mapCenterX, mapCenterY);
-                camScale = 1; camX = 0; camY = 0; updateCameraTransform();
-                
-                const marker = document.createElement('div'); marker.className = 'user-marker';
-                const label = document.createElement('div'); label.className = 'name-label'; label.innerText = data.name;
-                const feetContainer = document.createElement('div'); feetContainer.className = 'foot-container';
-                feetContainer.innerHTML = '<div class="footprint left-foot"></div><div class="footprint right-foot"></div>';
-                marker.appendChild(label); marker.appendChild(feetContainer); markersLayer.appendChild(marker);
-                
-                activeUsers[data.id] = { element: marker, timeout: null };
-                
-                // UPDATE THE ONLINE COUNTER
-                onlineCountDisplay.innerText = `${Object.keys(activeUsers).length} Wizard(s) Online`;
+    function renderMapGrid(centerX, centerY) {
+        mapContainer.innerHTML = ''; 
+        for (let dx = -GRID_RADIUS; dx <= GRID_RADIUS; dx++) {
+            for (let dy = -GRID_RADIUS; dy <= GRID_RADIUS; dy++) {
+                const img = document.createElement('img'); img.className = 'map-tile';
+                img.src = `https://tile.openstreetmap.org/${currentZoomLevel}/${centerX + dx}/${centerY + dy}.png`;
+                img.style.left = `${(dx + GRID_RADIUS) * TILE_SIZE}px`; img.style.top = `${(dy + GRID_RADIUS) * TILE_SIZE}px`;
+                mapContainer.appendChild(img);
             }
+        }
+    }
 
-            if (mapCenterX === null || mapCenterY === null) return;
-            const projection = projectCoordinates(data.lat, data.lon, currentZoomLevel);
-            const finalPixelX = (projection.tileX - mapCenterX + GRID_RADIUS) * TILE_SIZE + projection.pixelX;
-            const finalPixelY = (projection.tileY - mapCenterY + GRID_RADIUS) * TILE_SIZE + projection.pixelY;
+    // --- CORE PROCESSING ENGINE ---
+    function processLocationData(data) {
+        latestPayloads[data.id] = data;
+        
+        // Update last seen timestamp for garbage collection
+        data.lastSeen = Date.now();
 
-            const markerData = activeUsers[data.id];
-
-            if (previousPositions[data.id]) {
-                const dx = finalPixelX - previousPositions[data.id].x; const dy = finalPixelY - previousPositions[data.id].y;
-                if (Math.sqrt(dx*dx + dy*dy) > 0.5) {
-                    markerData.element.querySelector('.foot-container').style.transform = `rotate(${Math.atan2(dy, dx) * (180 / Math.PI) + 90}deg)`;
-                    markerData.element.classList.add('walking');
-                    clearTimeout(markerData.timeout);
-                    markerData.timeout = setTimeout(() => markerData.element.classList.remove('walking'), 2000);
-                }
+        if (!activeUsers[data.id]) {
+            const bounds = calculateBoundingBox(latestPayloads);
+            currentZoomLevel = bounds.targetZoom;
+            const centerProj = projectCoordinates(bounds.centerLat, bounds.centerLon, currentZoomLevel);
+            mapCenterX = centerProj.tileX; mapCenterY = centerProj.tileY;
+            renderMapGrid(mapCenterX, mapCenterY);
+            
+            // Only reset camera if it's our own first load
+            if (data.id === myId) {
+                camScale = 1; camX = 0; camY = 0; updateCameraTransform();
             }
             
-            previousPositions[data.id] = { x: finalPixelX, y: finalPixelY };
-            markerData.element.style.left = `${finalPixelX}px`; markerData.element.style.top = `${finalPixelY}px`;
-        };
-    </script>
+            const marker = document.createElement('div'); marker.className = 'user-marker';
+            const label = document.createElement('div'); label.className = 'name-label'; label.innerText = data.name;
+            const feetContainer = document.createElement('div'); feetContainer.className = 'foot-container';
+            feetContainer.innerHTML = '<div class="footprint left-foot"></div><div class="footprint right-foot"></div>';
+            
+            // Highlight our own marker slightly
+            if (data.id === myId) label.style.color = "#8b0000"; 
+            
+            marker.appendChild(label); marker.appendChild(feetContainer); markersLayer.appendChild(marker);
+            
+            activeUsers[data.id] = { element: marker, timeout: null };
+            onlineCountDisplay.innerText = `${Object.keys(activeUsers).length} Wizard(s) Online`;
+        }
+
+        if (mapCenterX === null || mapCenterY === null) return;
+        const projection = projectCoordinates(data.lat, data.lon, currentZoomLevel);
+        const finalPixelX = (projection.tileX - mapCenterX + GRID_RADIUS) * TILE_SIZE + projection.pixelX;
+        const finalPixelY = (projection.tileY - mapCenterY + GRID_RADIUS) * TILE_SIZE + projection.pixelY;
+
+        const markerData = activeUsers[data.id];
+
+        if (previousPositions[data.id]) {
+            const dx = finalPixelX - previousPositions[data.id].x; const dy = finalPixelY - previousPositions[data.id].y;
+            if (Math.sqrt(dx*dx + dy*dy) > 0.5) {
+                markerData.element.querySelector('.foot-container').style.transform = `rotate(${Math.atan2(dy, dx) * (180 / Math.PI) + 90}deg)`;
+                markerData.element.classList.add('walking');
+                clearTimeout(markerData.timeout);
+                markerData.timeout = setTimeout(() => markerData.element.classList.remove('walking'), 2000);
+            }
+        }
+        
+        previousPositions[data.id] = { x: finalPixelX, y: finalPixelY };
+        markerData.element.style.left = `${finalPixelX}px`; markerData.element.style.top = `${finalPixelY}px`;
+    }
+
+    // --- GARBAGE COLLECTION (STALE GHOST REMOVAL) ---
+    setInterval(() => {
+        const now = Date.now();
+        for (const id in latestPayloads) {
+            // If we haven't heard from them in 30 seconds (and it isn't us), remove them
+            if (id !== myId && (now - latestPayloads[id].lastSeen > 30000)) {
+                if (activeUsers[id]) {
+                    activeUsers[id].element.remove();
+                    delete activeUsers[id];
+                    delete latestPayloads[id];
+                    delete previousPositions[id];
+                }
+            }
+        }
+        onlineCountDisplay.innerText = `${Object.keys(activeUsers).length} Wizard(s) Online`;
+    }, 10000);
+
+    // --- NETWORK & SENSOR BINDINGS ---
+    ws.onopen = () => {
+        document.getElementById('status').innerText = `Active: ${myName}`;
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition((pos) => {
+                const payload = { id: myId, name: myName, lat: pos.coords.latitude, lon: pos.coords.longitude };
+                // 1. Send to server
+                ws.send(JSON.stringify(payload));
+                // 2. Process locally to avoid the Lone Wizard trap
+                processLocationData(payload);
+            }, (err) => console.error(err), { enableHighAccuracy: true, maximumAge: 0 });
+        }
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            processLocationData(data);
+        } catch (e) {
+            console.error("Malformed socket frame ignored", e);
+        }
+    };
+</script>
+
 </body>
 </html>
