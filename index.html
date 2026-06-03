@@ -354,60 +354,16 @@
         }
     };
      // Hardware Compass Rotation (Smoothed)
-const compass = document.getElementById('compass-rose');
-
-if (window.DeviceOrientationEvent && compass) {
-    let hasAbsoluteLock = false;
-    
-    // Physics states for the needle
-    let currentRotation = 0; 
-    let targetRotation = 0;
-
-    // 1. The Rendering Loop (Runs at 60FPS)
-    function animateCompass() {
-        // LERP: Move the needle 10% of the remaining distance per frame
-        currentRotation += (targetRotation - currentRotation) * 0.1;
-        compass.style.transform = `rotate(${currentRotation}deg)`;
-        requestAnimationFrame(animateCompass);
-    }
-    requestAnimationFrame(animateCompass); // Ignite the loop
-
-    // 2. The Shortest-Path Calculator
-    function updateTargetHeading(heading) {
-        let desiredRotation = -heading; // Reverse to keep North up
-        
-        // Calculate the angular delta
-        let diff = desiredRotation - targetRotation;
-        
-        // Normalize the delta to strictly fall between -180 and 180 degrees
-        // This completely eliminates the 360 -> 0 violent spin
-        diff = ((diff + 180) % 360 + 360) % 360 - 180;
-        
-        targetRotation += diff;
-    }
-
-    // 3. Sensor Bindings
+// Hardware Compass Rotation
+if (window.DeviceOrientationEvent) {
     window.addEventListener('deviceorientationabsolute', (event) => {
         if (event.alpha !== null) {
-            hasAbsoluteLock = true;
-            updateTargetHeading(event.alpha);
+            // event.alpha is the compass heading. We rotate the SVG in reverse to keep North pointing North.
+            const compass = document.getElementById('compass-rose');
+            compass.style.transform = `rotate(${-event.alpha}deg)`;
         }
-    }, true);
-
-    window.addEventListener('deviceorientation', (event) => {
-        if (hasAbsoluteLock) return;
-        
-        let heading = null;
-        if (event.webkitCompassHeading) {
-            heading = event.webkitCompassHeading;
-        } else if (event.alpha !== null) {
-            heading = 360 - event.alpha;
-        }
-        
-        if (heading !== null) updateTargetHeading(heading);
     }, true);
 }
-
 
 
 </script>
