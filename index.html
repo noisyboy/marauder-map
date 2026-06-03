@@ -57,26 +57,21 @@
     z-index: 5; 
     pointer-events: none; 
 }
+
 #compass-container {
     position: absolute;
     bottom: 20px;
     right: 20px;
     z-index: 10;
     pointer-events: none;
-    /* Create a solid parchment badge */
-    background: #d4c3a3; 
-    border: 3px solid #3e2723;
-    border-radius: 50%;
     width: 85px;
     height: 85px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 2px 2px 8px rgba(26, 15, 13, 0.6);
+    filter: drop-shadow(2px 2px 4px rgba(26, 15, 13, 0.6));
 }
 
-/* We spin the SVG inside the container, not the container itself */
 #compass-rose {
+    width: 100%;
+    height: 100%;
     transition: transform 0.1s ease-out;
     transform-origin: center;
 }
@@ -117,23 +112,27 @@
     </div>
 
     <div id="compass-container">
-    <svg id="compass-rose" viewBox="0 0 120 120" width="75" height="75">
-        <circle cx="60" cy="60" r="46" stroke="#1a0f0d" stroke-width="4" fill="none" />
-        <circle cx="60" cy="60" r="38" stroke="#1a0f0d" stroke-width="2" fill="none" stroke-dasharray="4 4"/>
+    <svg id="compass-rose" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="58" fill="#d4c3a3" stroke="#1a0f0d" stroke-width="3" />
         
-        <polygon points="60,10 70,50 110,60 70,70 60,110 50,70 10,60 50,50" fill="none" stroke="#1a0f0d" stroke-width="2"/>
+        <circle cx="60" cy="60" r="42" fill="none" stroke="#1a0f0d" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+        <text x="60" y="18" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="16" text-anchor="middle" dominant-baseline="central">N</text>
+        <text x="60" y="102" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="16" text-anchor="middle" dominant-baseline="central">S</text>
+        <text x="102" y="60" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="16" text-anchor="middle" dominant-baseline="central">E</text>
+        <text x="18" y="60" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="16" text-anchor="middle" dominant-baseline="central">W</text>
+
+        <polygon points="60,26 68,52 94,60 68,68 60,94 52,68 26,60 52,52" fill="none" stroke="#1a0f0d" stroke-width="2"/>
+
+        <polygon points="60,26 68,52 60,60" fill="#1a0f0d" />
+        <polygon points="94,60 68,68 60,60" fill="#1a0f0d" />
+        <polygon points="60,94 52,68 60,60" fill="#1a0f0d" />
+        <polygon points="26,60 52,52 60,60" fill="#1a0f0d" />
         
-        <polygon points="60,10 70,50 60,60" fill="#1a0f0d" />
-        <polygon points="60,110 50,70 60,60" fill="#1a0f0d" />
-        <polygon points="110,60 70,70 60,60" fill="#1a0f0d" />
-        <polygon points="10,60 50,50 60,60" fill="#1a0f0d" />
-        
-        <text x="60" y="28" fill="#d4c3a3" font-family="Courier New" font-weight="bold" font-size="20" text-anchor="middle">N</text>
-        <text x="60" y="102" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="18" text-anchor="middle">S</text>
-        <text x="96" y="65" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="18" text-anchor="middle">E</text>
-        <text x="24" y="65" fill="#1a0f0d" font-family="Courier New" font-weight="bold" font-size="18" text-anchor="middle">W</text>
+        <circle cx="60" cy="60" r="3" fill="#d4c3a3" />
     </svg>
 </div>
+
 
 
  <script>
@@ -360,26 +359,32 @@
             console.error("Malformed socket frame ignored", e);
         }
     };
-     // Hardware Compass Rotation
 // Hardware Compass Rotation (Cross-Platform)
-if (window.DeviceOrientationEvent) {
-    const compass = document.getElementById('compass-rose');
-    
+const compass = document.getElementById('compass-rose');
+
+if (window.DeviceOrientationEvent && compass) {
+    let hasAbsoluteLock = false;
+
+    // 1. Try to get true magnetic North (Android standard)
     window.addEventListener('deviceorientationabsolute', (event) => {
         if (event.alpha !== null) {
-            // Android absolute heading
+            hasAbsoluteLock = true;
+            // event.alpha is the magnetic heading. Rotate reverse to keep North up.
             compass.style.transform = `rotate(${-event.alpha}deg)`;
         }
     }, true);
 
-    // Fallback for devices that don't support absolute orientation natively
+    // 2. Fallback for iOS or unsupported sensors
     window.addEventListener('deviceorientation', (event) => {
+        // If Android already has a magnetic lock, kill this fallback to prevent jitter
+        if (hasAbsoluteLock) return;
+
         let heading = null;
         if (event.webkitCompassHeading) {
-            // iOS heading
+            // iOS explicitly uses this custom property for magnetic North
             heading = event.webkitCompassHeading;
-        } else if (event.alpha !== null && !window.ondeviceorientationabsolute) {
-            // Standard fallback calculation
+        } else if (event.alpha !== null) {
+            // Last resort: Standard relative alpha (may not align with true North)
             heading = 360 - event.alpha;
         }
         
