@@ -1,7 +1,7 @@
 
 ---
 
-# Tactical Telemetry Map
+# Marauder Map
 
 A real-time, zero-dependency WebSocket mapping application. This project provides a live, interactive map displaying the geolocation, trajectory, and heading of multiple connected clients.
 
@@ -37,8 +37,8 @@ The server requires no external Python dependencies. It binds to `0.0.0.0:8080` 
 
 ```bash
 # Clone the repository
-git clone https://github.com/noisyboy/tactical-telemetry.git
-cd tactical-telemetry/backend
+git clone https://github.com/noisyboy/marauder-map.git
+cd marauder-map
 
 # Execute the raw socket server
 python3 server.py
