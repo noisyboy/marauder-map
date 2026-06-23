@@ -1,6 +1,14 @@
 
 ---
 
+
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+**Limitation of Liability:** The author is not responsible for any damage, legal repercussions, or network disruption caused by the use of this software. By using marauder-map, you agree to assume all associated risks and liabilities.
+
 # Marauder Map
 
 A real-time, zero-dependency WebSocket mapping application. This project provides a live, interactive map displaying the geolocation, trajectory, and heading of multiple connected clients.
